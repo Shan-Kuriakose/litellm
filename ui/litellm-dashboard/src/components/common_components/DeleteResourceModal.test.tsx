@@ -121,6 +121,24 @@ describe("DeleteResourceModal", () => {
     expect(deleteButton).not.toBeDisabled();
   });
 
+  it("should enable delete button when requiredConfirmation input has surrounding whitespace from a paste", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<DeleteResourceModal {...defaultProps} requiredConfirmation="DELETE" />);
+    const input = screen.getByPlaceholderText("DELETE");
+    await user.type(input, "  DELETE  ");
+    const deleteButton = screen.getByRole("button", { name: /delete/i });
+    expect(deleteButton).not.toBeDisabled();
+  });
+
+  it("should still disable delete button when whitespace-trimmed input does not match exactly", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<DeleteResourceModal {...defaultProps} requiredConfirmation="DELETE" />);
+    const input = screen.getByPlaceholderText("DELETE");
+    await user.type(input, "  DELET  ");
+    const deleteButton = screen.getByRole("button", { name: /delete/i });
+    expect(deleteButton).toBeDisabled();
+  });
+
   it("should reset requiredConfirmation input when modal opens", async () => {
     const user = userEvent.setup();
     const { rerender } = renderWithProviders(<DeleteResourceModal {...defaultProps} requiredConfirmation="DELETE" />);
