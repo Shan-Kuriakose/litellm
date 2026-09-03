@@ -26,11 +26,13 @@ from litellm.utils import (
     TextCompletionStreamWrapper,
     _check_provider_match,
     _is_streaming_request,
+    cleanup_none_field_in_message,
     get_llm_provider,
     get_optional_params_image_gen,
     get_prompt_cache_min_tokens,
     is_cached_message,
     is_prompt_caching_valid_prompt,
+    validate_and_fix_openai_messages,
 )
 
 # Adds the parent directory to the system path
@@ -4916,3 +4918,64 @@ def test_is_prompt_caching_valid_prompt_explicit_min_token_count_overrides_model
         is_prompt_caching_valid_prompt(model="claude-opus-4-8", messages=PROMPT_CACHE_MESSAGES, min_token_count=8192)
         is False
     )
+
+
+def test_cleanup_none_field_in_message_keeps_null_content_on_tool_call_turn():
+    """Regression: https://github.com/BerriAI/litellm/issues/37711
+
+    An assistant message with tool_calls and content=None is the shape the OpenAI
+    spec prescribes for a tool-call-only turn. cleanup_none_field_in_message used to
+    strip every None-valued field, including content, so providers that require the
+    key to be present rejected the request."""
+    message = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "f", "arguments": "{}"}}],
+    }
+
+    cleaned = cleanup_none_field_in_message(message)
+
+    assert "content" in cleaned
+    assert cleaned["content"] is None
+    assert cleaned["tool_calls"] == message["tool_calls"]
+
+
+def test_cleanup_none_field_in_message_still_drops_none_fields_without_tool_calls():
+    """content=None must still be dropped for a plain assistant message, and other
+    None-valued fields (e.g. function) must still be dropped on a tool-call turn -
+    only content is exempted, and only when tool_calls is actually present."""
+    plain_assistant_message = {"role": "assistant", "content": None, "function": None}
+    assert cleanup_none_field_in_message(plain_assistant_message) == {"role": "assistant"}
+
+    tool_call_message = {
+        "role": "assistant",
+        "content": None,
+        "function": None,
+        "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "f", "arguments": "{}"}}],
+    }
+    cleaned = cleanup_none_field_in_message(tool_call_message)
+    assert "function" not in cleaned
+    assert cleaned["content"] is None
+
+
+def test_validate_and_fix_openai_messages_preserves_null_content_end_to_end():
+    """Regression: https://github.com/BerriAI/litellm/issues/37711
+
+    validate_and_fix_openai_messages is what litellm.completion() actually calls
+    before dispatching to a provider; the fix must hold through that full path, not
+    just the helper it delegates to."""
+    messages = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "f", "arguments": "{}"}}],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "ok"},
+    ]
+
+    fixed = validate_and_fix_openai_messages(messages=messages)
+
+    assistant_message = next(m for m in fixed if m["role"] == "assistant")
+    assert "content" in assistant_message
+    assert assistant_message["content"] is None
