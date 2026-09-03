@@ -102,7 +102,7 @@ async def block_user(data: BlockUsers):
                         "update": {"blocked": True},
                     },
                 )
-                records.append(record)
+                records.append(record.model_dump())
         else:
             raise HTTPException(
                 status_code=500,

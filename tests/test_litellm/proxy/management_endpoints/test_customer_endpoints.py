@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI, HTTPException, Request, status
+from pydantic import BaseModel
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
@@ -403,13 +404,30 @@ def test_update_customer_response_keeps_nested_budget_server_fields(mock_prisma_
     assert "updated_by" not in budget
 
 
+class _FakePrismaEndUserRow(BaseModel):
+    """Stands in for the row `.upsert()` returns in production: a Prisma-generated
+    model, which is a different class than litellm.models.end_user.LiteLLM_EndUserTable.
+    That distinction matters because pydantic skips re-running validators for an
+    input that's already an instance of the target class, so a mock built from
+    LiteLLM_EndUserTable itself would never exercise its `mode="before"` validator.
+    """
+
+    user_id: str
+    blocked: bool
+
+
 def test_block_customer_success_serializes_through_response_model(mock_prisma_client, mock_user_api_key_auth):
     """
-    /customer/block returns {"blocked_users": [<end user rows>]}. With
-    response_model=BlockUsersResponse, a shape mismatch would raise a 500
-    ResponseValidationError, so a clean 200 proves the model matches runtime output.
+    Regression test for https://github.com/BerriAI/litellm/issues/39011.
+
+    /customer/block returns {"blocked_users": [<end user rows>]}. response_model=
+    BlockUsersResponse validates each row into LiteLLM_EndUserTable, whose
+    `mode="before"` validator used to call `values.get("spend")`. That assumes a
+    dict, but a Prisma row only supports attribute access, so the validator raised
+    AttributeError and the endpoint answered 500 even though the block had already
+    been written to the DB.
     """
-    blocked_row = LiteLLM_EndUserTable(user_id="blocked-1", blocked=True)
+    blocked_row = _FakePrismaEndUserRow(user_id="blocked-1", blocked=True)
     mock_prisma_client.db.litellm_endusertable.upsert = AsyncMock(return_value=blocked_row)
 
     response = client.post(
