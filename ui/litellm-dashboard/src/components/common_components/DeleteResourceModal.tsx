@@ -53,7 +53,8 @@ export default function DeleteResourceModal({
       cancelText="Cancel"
       okButtonProps={{
         danger: true,
-        disabled: (!!requiredConfirmation && requiredConfirmationInput !== requiredConfirmation) || confirmLoading,
+        disabled:
+          (!!requiredConfirmation && requiredConfirmationInput.trim() !== requiredConfirmation) || confirmLoading,
       }}
       cancelButtonProps={{ disabled: confirmLoading }}
     >
