@@ -97,8 +97,14 @@ COPY --from=ui-builder /ui/out/. litellm/proxy/_experimental/out/
 # Build Admin UI before final sync (applies the enterprise color override when present)
 RUN sed -i 's/\r$//' docker/build_admin_ui.sh && chmod +x docker/build_admin_ui.sh && ./docker/build_admin_ui.sh
 
-# Install project and workspace packages (fast - deps already cached)
-RUN uv sync --frozen --no-default-groups --no-editable \
+# Install project and workspace packages (fast - deps already cached).
+# Cargo's registry and the litellm-rust target dir are cache-mounted so the
+# fat-LTO release build of the native extension only recompiles from scratch
+# once, not on every image build.
+RUN --mount=type=cache,target=/root/.cargo/registry,id=litellm-cargo-registry \
+    --mount=type=cache,target=/root/.cargo/git,id=litellm-cargo-git \
+    --mount=type=cache,target=/app/litellm-rust/target,id=litellm-cargo-target \
+    uv sync --frozen --no-default-groups --no-editable \
     --extra proxy \
     --extra proxy-runtime \
     --extra extra_proxy \
