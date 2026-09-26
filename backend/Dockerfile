@@ -46,7 +46,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --extra proxy-runtime \
         --extra extra_proxy \
         --extra semantic-router \
-        --python python3
+        --python 3.13
 
 # Stage 2 — copy source and install the project + workspace members.
 COPY . .
@@ -57,7 +57,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --extra proxy-runtime \
         --extra extra_proxy \
         --extra semantic-router \
-        --python python3
+        --python 3.13
 
 RUN mkdir -p /home/nonroot && \
     HOME=/home/nonroot prisma generate --schema=./schema.prisma && \

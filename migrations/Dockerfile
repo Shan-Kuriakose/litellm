@@ -56,7 +56,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-install-workspace --no-default-groups --no-editable \
         --extra proxy \
         --extra extra_proxy \
-        --python python3
+        --python 3.13
 
 # Stage 2 — copy source and install the project + workspace members.
 COPY . .
@@ -65,7 +65,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-default-groups --no-editable \
         --extra proxy \
         --extra extra_proxy \
-        --python python3
+        --python 3.13
 
 COPY migrations/run.py /app/run.py
 
