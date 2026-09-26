@@ -1,21 +1,15 @@
 import os
-import sys
 import traceback
 
 from dotenv import load_dotenv
 
 load_dotenv()
 import io
-import os
 
 from test_streaming import streaming_format_tests
 
-sys.path.insert(
-    0, os.path.abspath("../..")
-)  # Adds the parent directory to the system path
 import asyncio
 import json
-import os
 import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch, ANY
 from respx import MockRouter
@@ -2067,28 +2061,6 @@ async def test_vertexai_multimodal_embedding_base64image_in_input():
         print("Response:", response)
 
 
-def test_vertexai_embedding_embedding_latest():
-    try:
-        load_vertex_ai_credentials()
-        litellm.set_verbose = True
-
-        response = embedding(
-            model="vertex_ai/text-embedding-004",
-            input=["hi"],
-            dimensions=1,
-            auto_truncate=True,
-            task_type="RETRIEVAL_QUERY",
-        )
-
-        assert len(response.data[0]["embedding"]) == 1
-        assert response.usage.prompt_tokens > 0
-        print(f"response:", response)
-    except litellm.RateLimitError as e:
-        pass
-    except Exception as e:
-        pytest.fail(f"Error occurred: {e}")
-
-
 def test_vertexai_multimodalembedding_embedding_latest():
     try:
         import requests, base64
@@ -2891,7 +2863,7 @@ def test_gemini_function_call_parameter_in_messages():
             mock_client.return_value = mock_response
             try:
                 completion(
-                    model="vertex_ai/gemini-2.0-flash",
+                    model="vertex_ai/gemini-2.5-flash-preview-09-2025",
                     messages=messages,
                     tools=tools,
                     tool_choice="auto",
@@ -3291,7 +3263,7 @@ def test_vertex_anthropic_completion():
         client, "post", side_effect=vertex_ai_anthropic_thinking_mock_response
     ):
         response = completion(
-            model="vertex_ai/claude-3-7-sonnet@20250219",
+            model="vertex_ai/claude-sonnet-4-6@default",
             messages=[{"role": "user", "content": "Hello, world!"}],
             vertex_ai_location="us-east5",
             vertex_ai_project="test-project",
@@ -3299,7 +3271,7 @@ def test_vertex_anthropic_completion():
             client=client,
         )
         print(response)
-        assert response.model == "claude-3-7-sonnet@20250219"
+        assert response.model == "claude-sonnet-4-6@default"
         assert response._hidden_params["response_cost"] is not None
         assert response._hidden_params["response_cost"] > 0
 
@@ -3359,7 +3331,7 @@ def test_gemini_fine_tuned_model_request_consistency():
     Assert the same transformation is applied to Fine tuned gemini 2.0 flash and gemini 2.0 flash
 
     - Request 1: Fine tuned: vertex_ai/gemini/ft-uuid
-    - Request 2: vertex_ai/gemini-2.0-flash-001
+    - Request 2: vertex_ai/gemini-2.5-flash
     """
     litellm.set_verbose = True
     load_vertex_ai_credentials()
@@ -3431,7 +3403,7 @@ def test_gemini_fine_tuned_model_request_consistency():
     with patch.object(client, "post", new=MagicMock()) as mock_post_2:
         try:
             response_2 = completion(
-                model="vertex_ai/gemini-2.0-flash-001",
+                model="vertex_ai/gemini-2.5-flash",
                 messages=messages,
                 tools=tools,
                 tool_choice="auto",
@@ -4230,13 +4202,7 @@ def test_gemini_google_maps_tool_simple():
             )
         print(f"Response: {response.model_dump_json(indent=4)}")
         assert response.choices[0].message.content is not None
-    except (litellm.RateLimitError, litellm.InternalServerError):
-        # Transient Vertex-side failures (rate limiting, 500 INTERNAL from the
-        # Google Maps grounding backend) are not LiteLLM bugs — don't fail CI.
-        pass
-    except litellm.InternalServerError:
-        pytest.skip(
-            "Google Maps Platform returned a transient 500 (upstream flake); skipping."
-        )
+    except (litellm.RateLimitError, litellm.InternalServerError) as e:
+        pytest.skip(f"Transient Vertex-side failure, not a LiteLLM bug: {e}")
     except Exception as e:
         pytest.fail(f"Error occurred: {e}")

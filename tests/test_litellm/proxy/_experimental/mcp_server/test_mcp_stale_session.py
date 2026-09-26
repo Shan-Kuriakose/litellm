@@ -639,12 +639,12 @@ async def test_per_user_oauth_missing_stored_token_returns_preemptive_401():
             return_value=False,
         ),
         patch(
-            "litellm.proxy._experimental.mcp_server.server.global_mcp_server_manager.has_user_oauth_token",
+            "litellm.proxy._experimental.mcp_server.operations.global_mcp_server_manager.has_user_oauth_token",
             new_callable=AsyncMock,
             return_value=False,
         ) as mock_has_token,
         patch(
-            "litellm.proxy._experimental.mcp_server.server.global_mcp_server_manager.get_mcp_server_by_name",
+            "litellm.proxy._experimental.mcp_server.operations.global_mcp_server_manager.get_mcp_server_by_name",
             return_value=oauth_server,
         ),
         patch.object(
@@ -662,6 +662,96 @@ async def test_per_user_oauth_missing_stored_token_returns_preemptive_401():
     assert exc_info.value.status_code == 401
     assert "www-authenticate" in exc_info.value.headers
     assert "Bearer authorization_uri=" in exc_info.value.headers["www-authenticate"]
+
+
+@pytest.mark.asyncio
+async def test_admitted_subject_missing_stored_token_challenged_with_resource_metadata():
+    """
+    LIT-4864: a keyless gateway-session subject (mcp_admitted_user_subject) with no stored
+    per-user token must be challenged with the per-server resource_metadata, whose
+    authorization server is the gateway itself, so the client re-runs the gateway sign-in
+    flow and vaults the upstream token through the authorize interlude. The keyed
+    authorization_uri challenge points at the per-server relay, which cannot vault a token
+    for a keyless client (its token request carries no litellm credential), so sending an
+    admitted subject there would dead-end the flow on a raw upstream token.
+    """
+    from fastapi import HTTPException
+
+    try:
+        from litellm.proxy._experimental.mcp_server.server import (
+            handle_streamable_http_mcp,
+            session_manager_stateless,
+        )
+    except ImportError:
+        pytest.skip("MCP server not available")
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/mcp/repro_oauth_server",
+        "scheme": "http",
+        "query_string": b"",
+        "root_path": "",
+        "server": ("localhost", 8000),
+        "headers": [
+            (b"content-type", b"application/json"),
+            (b"host", b"localhost:8000"),
+        ],
+    }
+    receive = AsyncMock()
+    send = AsyncMock()
+    user_auth = MagicMock()
+    user_auth.user_id = "sso-user-42"
+    user_auth.mcp_admitted_user_subject = True
+    oauth_server = MagicMock()
+    oauth_server.auth_type = MCPAuth.oauth2
+    oauth_server.needs_user_oauth_token = True
+    oauth_server.delegate_auth_to_upstream = False
+
+    with (
+        patch(
+            "litellm.proxy._experimental.mcp_server.server.extract_mcp_auth_context",
+            new_callable=AsyncMock,
+            return_value=(user_auth, None, ["repro_oauth_server"], None, None, None),
+        ),
+        patch(
+            "litellm.proxy._experimental.mcp_server.server.set_auth_context",
+        ),
+        patch(
+            "litellm.proxy._experimental.mcp_server.server._SESSION_MANAGERS_INITIALIZED",
+            True,
+        ),
+        patch(
+            "litellm.proxy._experimental.mcp_server.server._handle_stale_mcp_session",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            "litellm.proxy._experimental.mcp_server.operations.global_mcp_server_manager.has_user_oauth_token",
+            new_callable=AsyncMock,
+            return_value=False,
+        ) as mock_has_token,
+        patch(
+            "litellm.proxy._experimental.mcp_server.operations.global_mcp_server_manager.get_mcp_server_by_name",
+            return_value=oauth_server,
+        ),
+        patch.object(
+            session_manager_stateless,
+            "handle_request",
+            new_callable=AsyncMock,
+        ) as mock_handle_request,
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            await handle_streamable_http_mcp(scope, receive, send)
+
+    assert mock_has_token.await_count == 1
+    assert mock_handle_request.await_count == 0
+    assert exc_info.value.status_code == 401
+    challenge = exc_info.value.headers["www-authenticate"]
+    assert "authorization_uri=" not in challenge
+    assert challenge == (
+        'Bearer resource_metadata="http://localhost:8000/.well-known/oauth-protected-resource/mcp/repro_oauth_server"'
+    )
 
 
 @pytest.mark.asyncio
@@ -743,11 +833,11 @@ async def test_client_credentials_server_is_not_preemptively_challenged(m2m_fiel
             return_value=False,
         ),
         patch(
-            "litellm.proxy._experimental.mcp_server.server.global_mcp_server_manager.has_user_oauth_token",
+            "litellm.proxy._experimental.mcp_server.operations.global_mcp_server_manager.has_user_oauth_token",
             new_callable=AsyncMock,
         ) as mock_has_token,
         patch(
-            "litellm.proxy._experimental.mcp_server.server.global_mcp_server_manager.get_mcp_server_by_name",
+            "litellm.proxy._experimental.mcp_server.operations.global_mcp_server_manager.get_mcp_server_by_name",
             return_value=m2m_server,
         ),
         patch.object(session_manager_stateless, "handle_request", new_callable=AsyncMock) as mock_handle_request,
@@ -839,13 +929,18 @@ async def test_handle_streamable_http_mcp_delegated_server_surfaces_upstream_cha
             return_value=False,
         ),
         patch(
-            "litellm.proxy._experimental.mcp_server.server._get_user_oauth_extra_headers_from_db",
+            "litellm.proxy._experimental.mcp_server.operations._get_user_oauth_extra_headers_from_db",
             new_callable=AsyncMock,
             return_value=None,
         ),
         patch(
-            "litellm.proxy._experimental.mcp_server.server.global_mcp_server_manager.get_mcp_server_by_name",
+            "litellm.proxy._experimental.mcp_server.operations.global_mcp_server_manager.get_mcp_server_by_name",
             return_value=delegated_server,
+        ),
+        patch(  # test-quality-ok: registry is empty in unit tests; key owns the delegated server
+            "litellm.proxy._experimental.mcp_server.operations._get_allowed_mcp_servers",
+            new_callable=AsyncMock,
+            return_value=[delegated_server],
         ),
         patch.object(
             session_manager_stateful,
@@ -927,12 +1022,12 @@ async def test_per_user_oauth_with_stored_token_skips_preemptive_401():
             return_value=False,
         ),
         patch(
-            "litellm.proxy._experimental.mcp_server.server.global_mcp_server_manager.has_user_oauth_token",
+            "litellm.proxy._experimental.mcp_server.operations.global_mcp_server_manager.has_user_oauth_token",
             new_callable=AsyncMock,
             return_value=True,
         ) as mock_has_token,
         patch(
-            "litellm.proxy._experimental.mcp_server.server.global_mcp_server_manager.get_mcp_server_by_name",
+            "litellm.proxy._experimental.mcp_server.operations.global_mcp_server_manager.get_mcp_server_by_name",
             return_value=oauth_server,
         ),
         patch.object(
@@ -1031,11 +1126,11 @@ async def test_handle_streamable_http_mcp_delegated_server_without_token_returns
             return_value=False,
         ),
         patch(
-            "litellm.proxy._experimental.mcp_server.server.global_mcp_server_manager.has_user_oauth_token",
+            "litellm.proxy._experimental.mcp_server.operations.global_mcp_server_manager.has_user_oauth_token",
             new_callable=AsyncMock,
         ) as mock_has_token,
         patch(
-            "litellm.proxy._experimental.mcp_server.server.global_mcp_server_manager.get_mcp_server_by_name",
+            "litellm.proxy._experimental.mcp_server.operations.global_mcp_server_manager.get_mcp_server_by_name",
             return_value=delegated_server,
         ),
         patch.object(
@@ -1123,7 +1218,7 @@ async def test_handle_streamable_http_mcp_token_exchange_without_subject_returns
             return_value=False,
         ),
         patch(
-            "litellm.proxy._experimental.mcp_server.server.global_mcp_server_manager.get_mcp_server_by_name",
+            "litellm.proxy._experimental.mcp_server.operations.global_mcp_server_manager.get_mcp_server_by_name",
             return_value=obo_server,
         ),
         patch.object(
@@ -1222,7 +1317,7 @@ async def test_handle_streamable_http_mcp_oauth_delegate_without_token_returns_g
             True,
         ),
         patch(
-            "litellm.proxy._experimental.mcp_server.server.global_mcp_server_manager.get_mcp_server_by_name",
+            "litellm.proxy._experimental.mcp_server.operations.global_mcp_server_manager.get_mcp_server_by_name",
             return_value=od_server,
         ),
         patch.object(
@@ -1296,7 +1391,7 @@ async def test_handle_streamable_http_mcp_oauth_delegate_with_forwarded_token_sk
             new_callable=AsyncMock,
         ),
         patch(
-            "litellm.proxy._experimental.mcp_server.server.global_mcp_server_manager.get_mcp_server_by_name",
+            "litellm.proxy._experimental.mcp_server.operations.global_mcp_server_manager.get_mcp_server_by_name",
             return_value=od_server,
         ),
         patch.object(
@@ -1320,6 +1415,8 @@ async def _run_passthrough_connect(
 ):
     """Drive handle_streamable_http_mcp through the preemptive-401 gate and report whether it
     challenged (raised) or forwarded to the session manager. Returns (challenged, www_authenticate)."""
+    from fastapi import HTTPException
+
     from litellm.proxy._experimental.mcp_server.server import (
         handle_streamable_http_mcp,
         session_manager_stateless,
@@ -1356,7 +1453,7 @@ async def _run_passthrough_connect(
             new_callable=AsyncMock,
         ),
         patch(
-            "litellm.proxy._experimental.mcp_server.server.global_mcp_server_manager.get_mcp_server_by_name",
+            "litellm.proxy._experimental.mcp_server.operations.global_mcp_server_manager.get_mcp_server_by_name",
             return_value=server,
         ),
         patch.object(session_manager_stateless, "handle_request", new_callable=AsyncMock) as mock_handle_request,
@@ -1477,7 +1574,7 @@ async def test_handle_streamable_http_mcp_true_passthrough_without_token_surface
             return_value=probe_client,
         ),
         patch(
-            "litellm.proxy._experimental.mcp_server.server.global_mcp_server_manager.get_mcp_server_by_name",
+            "litellm.proxy._experimental.mcp_server.operations.global_mcp_server_manager.get_mcp_server_by_name",
             return_value=tp_server,
         ),
         patch.object(
@@ -1545,7 +1642,7 @@ async def test_handle_streamable_http_mcp_true_passthrough_dcr_bridge_challenges
             return_value=probe_client,
         ),
         patch(
-            "litellm.proxy._experimental.mcp_server.server.global_mcp_server_manager.get_mcp_server_by_name",
+            "litellm.proxy._experimental.mcp_server.operations.global_mcp_server_manager.get_mcp_server_by_name",
             return_value=bridge_server,
         ),
         patch.object(
@@ -1623,7 +1720,7 @@ async def test_handle_streamable_http_mcp_true_passthrough_with_token_skips_prob
             return_value=probe_client,
         ),
         patch(
-            "litellm.proxy._experimental.mcp_server.server.global_mcp_server_manager.get_mcp_server_by_name",
+            "litellm.proxy._experimental.mcp_server.operations.global_mcp_server_manager.get_mcp_server_by_name",
             return_value=tp_server,
         ),
         patch.object(

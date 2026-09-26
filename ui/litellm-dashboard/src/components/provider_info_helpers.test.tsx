@@ -62,10 +62,32 @@ describe("provider_info_helpers", () => {
       expect(result.logo).toBe(providerLogoMap[Providers.Groq]);
     });
 
+    it("should map scx-ai slug and SCX_AI enum key to the SCX.ai display name and logo", () => {
+      const fromSlug = getProviderLogoAndName("scx-ai");
+      expect(fromSlug.displayName).toBe(Providers.SCX_AI);
+      expect(fromSlug.logo).toBe(providerLogoMap[Providers.SCX_AI]);
+      expect(fromSlug.logo).toBeTruthy();
+
+      const fromEnumKey = getProviderLogoAndName("SCX_AI");
+      expect(fromEnumKey.displayName).toBe(Providers.SCX_AI);
+      expect(fromEnumKey.logo).toBe(providerLogoMap[Providers.SCX_AI]);
+    });
+
     it("should map bedrock_mantle slug to Bedrock Mantle display name and logo", () => {
       const result = getProviderLogoAndName("bedrock_mantle");
       expect(result.displayName).toBe(Providers.BedrockMantle);
       expect(result.logo).toBe(providerLogoMap[Providers.BedrockMantle]);
+    });
+
+    it("should map edenai slug and EDENAI enum key to the Eden AI display name and logo", () => {
+      const fromSlug = getProviderLogoAndName("edenai");
+      expect(fromSlug.displayName).toBe(Providers.EDENAI);
+      expect(fromSlug.logo).toBe(providerLogoMap[Providers.EDENAI]);
+      expect(fromSlug.logo).toBeTruthy();
+
+      const fromEnumKey = getProviderLogoAndName("EDENAI");
+      expect(fromEnumKey.displayName).toBe(Providers.EDENAI);
+      expect(fromEnumKey.logo).toBe(providerLogoMap[Providers.EDENAI]);
     });
 
     it("should resolve the BedrockMantle enum key to the Bedrock Mantle logo", () => {
@@ -76,6 +98,16 @@ describe("provider_info_helpers", () => {
       const result = getProviderLogoAndName("BedrockMantle");
       expect(result.displayName).toBe(Providers.BedrockMantle);
       expect(result.logo).toBe(providerLogoMap[Providers.BedrockMantle]);
+    });
+
+    it("should map the chatgpt slug and CHATGPT enum key to the ChatGPT Subscription name and OpenAI logo", () => {
+      const fromSlug = getProviderLogoAndName("chatgpt");
+      expect(fromSlug.displayName).toBe("ChatGPT Subscription");
+      expect(fromSlug.logo).toContain("openai_small");
+
+      const fromEnumKey = getProviderLogoAndName("CHATGPT");
+      expect(fromEnumKey.displayName).toBe("ChatGPT Subscription");
+      expect(fromEnumKey.logo).toContain("openai_small");
     });
 
     it("should handle provider values case-insensitively", () => {
@@ -92,6 +124,31 @@ describe("provider_info_helpers", () => {
       // the display name (no mapping).
       const result = getProviderLogoAndName("zai");
       expect(result.displayName).toBe(Providers.ZAI);
+    });
+
+    it("should give hosted_vllm and vllm distinct display names", () => {
+      const hosted = getProviderLogoAndName("hosted_vllm");
+      const local = getProviderLogoAndName("vllm");
+      expect(hosted.displayName).toBe("Hosted vLLM");
+      expect(local.displayName).toBe("Local vLLM");
+      expect(hosted.displayName.toLowerCase()).not.toBe(local.displayName.toLowerCase());
+      expect(hosted.logo).toBe(providerLogoMap[Providers.Hosted_Vllm]);
+      expect(local.logo).toBe(providerLogoMap[Providers.VLLM]);
+    });
+
+    it("should resolve the nvidia_riva provider value to the Nvidia Riva display name and logo", () => {
+      const result = getProviderLogoAndName("nvidia_riva");
+      expect(result.displayName).toBe(Providers.NVIDIA_RIVA);
+      expect(provider_map.NVIDIA_RIVA).toBe("nvidia_riva");
+      expect(result.logo).toBe(providerLogoMap[Providers.NVIDIA_RIVA]);
+      expect(result.logo).toBeTruthy();
+    });
+
+    it("should resolve the qwen_ai_platform slug and Qwen_AI_Platform enum key to the Qianwen AI Platform display name", () => {
+      expect(getProviderLogoAndName("qwen_ai_platform").displayName).toBe("Qianwen AI Platform");
+      expect(getProviderLogoAndName("Qwen_AI_Platform").displayName).toBe("Qianwen AI Platform");
+      expect(getProviderLogoAndName("qwencloud").displayName).toBe("QwenCloud");
+      expect(getProviderLogoAndName("qwen_ai_platform").logo).toBe(providerLogoMap[Providers.Qwen_AI_Platform]);
     });
 
     it("should return provider value as display name when no mapping exists", () => {
@@ -119,6 +176,7 @@ describe("provider_info_helpers", () => {
         Providers.AUTO_ROUTER,
         Providers.BYTEZ,
         Providers.CLARIFAI,
+        Providers.Cognition,
         Providers.COMPACTIFAI,
         Providers.DATAROBOT,
         Providers.DOCKER_MODEL_RUNNER,
@@ -159,6 +217,14 @@ describe("provider_info_helpers", () => {
 
     it("should return gemini-pro placeholder for Vertex_AI provider", () => {
       expect(getPlaceholder(Providers.Vertex_AI)).toBe("gemini-pro");
+    });
+
+    it("should return an scx-ai model placeholder for SCX_AI provider", () => {
+      expect(getPlaceholder(Providers.SCX_AI)).toBe("scx-ai/GLM-5.2");
+    });
+
+    it("should return an edenai model placeholder for EDENAI provider", () => {
+      expect(getPlaceholder(Providers.EDENAI)).toBe("edenai/openai/gpt-mini-latest");
     });
 
     it("should return claude-3-opus placeholder for Anthropic provider", () => {
@@ -223,6 +289,23 @@ describe("provider_info_helpers", () => {
 
     it("should return zai/glm-4.5 placeholder for Z.AI provider", () => {
       expect(getPlaceholder(Providers.ZAI)).toBe("zai/glm-4.5");
+    });
+
+    it("should return the riva asr placeholder for NVIDIA_RIVA provider", () => {
+      expect(getPlaceholder(Providers.NVIDIA_RIVA)).toBe("nvidia_riva/nvidia/parakeet-ctc-1_1b-asr");
+    });
+
+    it("should resolve enum keys from the provider dropdown, not just enum values", () => {
+      expect(getPlaceholder("NVIDIA_RIVA")).toBe("nvidia_riva/nvidia/parakeet-ctc-1_1b-asr");
+      expect(getPlaceholder("WATSONX")).toBe("watsonx/ibm/granite-3-3-8b-instruct");
+    });
+
+    it("should return cognition/swe-1.7 placeholder for Cognition provider", () => {
+      expect(getPlaceholder(Providers.Cognition)).toBe("cognition/swe-1.7");
+    });
+
+    it("should return a chatgpt/ placeholder for the CHATGPT dropdown key", () => {
+      expect(getPlaceholder("CHATGPT")).toBe("chatgpt/gpt-5.4");
     });
 
     it("should return default gpt-3.5-turbo placeholder for unknown provider", () => {
