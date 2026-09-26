@@ -37,7 +37,7 @@ USER root
 COPY --from=uvbin /uv /usr/local/bin/uv
 COPY --from=uvbin /uvx /usr/local/bin/uvx
 
-RUN apk add --no-cache \
+RUN apk upgrade --no-cache && apk add --no-cache \
     bash \
     gcc \
     python3 \
