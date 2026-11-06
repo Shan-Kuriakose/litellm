@@ -171,8 +171,8 @@ describe("buildChatCompletionParams", () => {
   });
 
   it("attaches the configured email as the OpenAI user field", () => {
-    expect(buildChatCompletionParams(request({ userEmail: "pradip.kundu@emids.com" })).user).toBe(
-      "pradip.kundu@emids.com",
+    expect(buildChatCompletionParams(request({ userEmail: "user@example.com" })).user).toBe(
+      "user@example.com",
     );
   });
 });
