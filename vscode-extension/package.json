@@ -49,6 +49,12 @@
               "title": "API key",
               "description": "A LiteLLM virtual key. The models offered are the ones this key can access",
               "secret": true
+            },
+            "userEmail": {
+              "type": "string",
+              "title": "Work email",
+              "description": "Your work email. Sent as the OpenAI `user` field on every request so your proxy admin can attribute usage and spend per person. Optional — leave blank to send requests anonymously.",
+              "default": ""
             }
           },
           "required": [
