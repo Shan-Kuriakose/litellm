@@ -114,6 +114,7 @@ export class LiteLLMChatProvider implements vscode.LanguageModelChatProvider<Lit
       requireToolCall: options.toolMode === vscode.LanguageModelChatToolMode.Required,
       reasoningEffort: reasoningEffortFrom(options.modelConfiguration),
       modelOptions: options.modelOptions ?? {},
+      userEmail: model.gateway.userEmail,
     });
     try {
       await withAbortSignal(token, async (signal) => {

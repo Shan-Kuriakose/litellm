@@ -6,6 +6,7 @@ import { parseModelGroups, type ConfigurationValues, type ModelGroupInfo } from 
 export interface GatewayConfig {
   readonly baseUrl: string;
   readonly apiKey: string;
+  readonly userEmail?: string;
 }
 
 export type GatewayConfigResult =
@@ -59,8 +60,11 @@ export const gatewayConfigFrom = (configuration: ConfigurationValues | undefined
     const fields = [...(baseUrl === undefined ? ["Gateway URL"] : []), ...(apiKey === undefined ? ["API key"] : [])];
     return { kind: "missing_fields", fields };
   }
+  const userEmail = nonEmptyString(configuration.userEmail);
   const root = gatewayRoot(baseUrl);
-  return root === undefined ? { kind: "invalid_url", baseUrl } : { kind: "ok", config: { baseUrl: root, apiKey } };
+  return root === undefined
+    ? { kind: "invalid_url", baseUrl }
+    : { kind: "ok", config: { baseUrl: root, apiKey, userEmail } };
 };
 
 export const modelGroupInfoUrl = (root: string): string => `${root}/model_group/info`;
