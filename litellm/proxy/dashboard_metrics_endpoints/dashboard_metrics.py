@@ -1,7 +1,6 @@
 """HTTP routes for /dashboard-metrics/*.
 
-See ``LITELLM_INTEGRATION.md §6`` in the claude-dashboard repo for the
-contract. Three routes, all gated on the same shared bearer token:
+Three routes, all gated on the same shared bearer token:
 
   GET /dashboard-metrics/users?from=YYYY-MM-DD&to=YYYY-MM-DD&granularity=day
   GET /dashboard-metrics/pricing-gaps?from=YYYY-MM-DD&to=YYYY-MM-DD

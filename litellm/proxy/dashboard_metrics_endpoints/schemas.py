@@ -1,10 +1,10 @@
 """Pydantic response models for /dashboard-metrics/*.
 
-The response shape is frozen in claude-dashboard/LITELLM_INTEGRATION.md §6.2.
-Email is the identity field exposed to the dashboard — LiteLLM's
-``end_user_id`` is renamed to ``email`` on the way out so the dashboard
-can key on exactly the same identifier it already uses for Claude Code
-(``user.email`` from OTel).
+Shapes the per-user daily rollup rows for consumption by any external
+dashboard. The underlying ``end_user_id`` column is exposed as
+``email`` in the response — callers are expected to attach the user's
+email via the OpenAI-standard ``user`` field on each request so the
+proxy's existing pre-call hook can populate it.
 """
 
 from __future__ import annotations
