@@ -96,7 +96,27 @@ describe("gatewayConfigFrom", () => {
     expect(gatewayConfigFrom({ baseUrl: "localhost:4000", apiKey: "sk" })).toEqual({ kind: "invalid_url", baseUrl: "localhost:4000" });
     expect(gatewayConfigFrom({ baseUrl: " http://localhost:4000/v1/ ", apiKey: " sk-test " })).toEqual({
       kind: "ok",
-      config: { baseUrl: "http://localhost:4000", apiKey: "sk-test" },
+      config: { baseUrl: "http://localhost:4000", apiKey: "sk-test", userEmail: undefined },
+    });
+  });
+
+  it("leaves userEmail undefined when absent or blank", () => {
+    expect(gatewayConfigFrom({ baseUrl: "http://localhost:4000", apiKey: "sk-test" })).toEqual({
+      kind: "ok",
+      config: { baseUrl: "http://localhost:4000", apiKey: "sk-test", userEmail: undefined },
+    });
+    expect(gatewayConfigFrom({ baseUrl: "http://localhost:4000", apiKey: "sk-test", userEmail: "   " })).toEqual({
+      kind: "ok",
+      config: { baseUrl: "http://localhost:4000", apiKey: "sk-test", userEmail: undefined },
+    });
+  });
+
+  it("trims a configured userEmail", () => {
+    expect(
+      gatewayConfigFrom({ baseUrl: "http://localhost:4000", apiKey: "sk-test", userEmail: "  user@example.com  " }),
+    ).toEqual({
+      kind: "ok",
+      config: { baseUrl: "http://localhost:4000", apiKey: "sk-test", userEmail: "user@example.com" },
     });
   });
 });

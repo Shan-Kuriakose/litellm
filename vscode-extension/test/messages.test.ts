@@ -165,4 +165,14 @@ describe("buildChatCompletionParams", () => {
     expect(params).not.toHaveProperty("seed");
     expect(params).not.toHaveProperty("foo");
   });
+
+  it("omits the user field when no email is configured", () => {
+    expect(buildChatCompletionParams(request())).not.toHaveProperty("user");
+  });
+
+  it("attaches the configured email as the OpenAI user field", () => {
+    expect(buildChatCompletionParams(request({ userEmail: "user@example.com" })).user).toBe(
+      "user@example.com",
+    );
+  });
 });

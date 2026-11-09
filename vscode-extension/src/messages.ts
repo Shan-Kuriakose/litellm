@@ -17,6 +17,7 @@ export interface ChatRequestInput {
   readonly requireToolCall: boolean;
   readonly reasoningEffort: string | undefined;
   readonly modelOptions: { readonly [key: string]: unknown };
+  readonly userEmail?: string;
 }
 
 interface TextPart {
@@ -185,4 +186,5 @@ export const buildChatCompletionParams = (input: ChatRequestInput): ChatCompleti
   ...(input.reasoningEffort === undefined
     ? {}
     : { reasoning_effort: input.reasoningEffort as ChatCompletionCreateParamsStreaming["reasoning_effort"] }),
+  ...(input.userEmail === undefined ? {} : { user: input.userEmail }),
 });
