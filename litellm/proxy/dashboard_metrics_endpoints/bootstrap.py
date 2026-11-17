@@ -63,18 +63,41 @@ async def seed_global_dashboard_token(prisma_client: Any) -> None:
             )
             return
 
-        await prisma_client.db.litellm_dashboardtoken.create(
-            data={
-                "token_hash": token_hash,
-                "team_id": None,
-                "scope_type": "global",
-                "label": "Global",
-                "created_by": "bootstrap",
-            }
-        )
-        verbose_proxy_logger.info(
-            "Seeded global dashboard token row (scope_type='global')."
-        )
+        try:
+            await prisma_client.db.litellm_dashboardtoken.create(
+                data={
+                    "token_hash": token_hash,
+                    "team_id": None,
+                    "scope_type": "global",
+                    "label": "Global",
+                    "created_by": "bootstrap",
+                }
+            )
+            verbose_proxy_logger.info(
+                "Seeded global dashboard token row (scope_type='global')."
+            )
+        except Exception as create_exc:
+            # A concurrent worker's bootstrap may have won the insert between
+            # our pre-checks and this create. The DB-level partial unique
+            # index ``one_live_global`` enforces the invariant; we just need
+            # to treat the loser's create as idempotent-success, not a real
+            # failure.
+            existing_now = await prisma_client.db.litellm_dashboardtoken.find_first(
+                where={
+                    "token_hash": token_hash,
+                    "scope_type": "global",
+                    "revoked_at": None,
+                }
+            )
+            if existing_now is not None:
+                verbose_proxy_logger.info(
+                    "Global dashboard token already seeded by a concurrent "
+                    "worker (idempotent-success)."
+                )
+            else:
+                # Create failed AND the row isn't present under our hash —
+                # this is a real failure. Let the outer handler log it.
+                raise
     except Exception as exc:  # fail-open: never block proxy startup
         verbose_proxy_logger.warning(
             "Global dashboard token bootstrap failed (continuing startup): %s", exc

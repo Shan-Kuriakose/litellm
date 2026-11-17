@@ -115,6 +115,51 @@ async def test_bootstrap_warns_and_noop_when_different_live_global(monkeypatch, 
 
 
 @pytest.mark.asyncio
+async def test_bootstrap_multi_worker_race_is_idempotent_success(monkeypatch, caplog):
+    """A concurrent worker winning the create must NOT log 'bootstrap failed'.
+
+    Simulates: both pre-checks see table empty, both call ``.create``, the
+    partial unique index rejects ours. Re-checking the table shows the row IS
+    present under our hash (the other worker won). The function must treat
+    that as idempotent-success (INFO), not a real failure (WARNING).
+    """
+    monkeypatch.setenv(DASHBOARD_METRICS_TOKEN_ENV_VAR, RAW_TOKEN)
+
+    client = MagicMock()
+    client.db = MagicMock()
+    client.db.litellm_dashboardtoken = MagicMock()
+
+    # Pre-checks (2 calls): both return None (table empty from our view).
+    # Post-create re-check (1 call): returns the row — the concurrent worker
+    # inserted it between our check and our create.
+    winning_row = SimpleNamespace(
+        token_hash=TOKEN_HASH, scope_type="global", team_id=None, revoked_at=None
+    )
+    client.db.litellm_dashboardtoken.find_first = AsyncMock(
+        side_effect=[None, None, winning_row]
+    )
+    # Our .create loses the race — unique-violation.
+    client.db.litellm_dashboardtoken.create = AsyncMock(
+        side_effect=Exception("duplicate key value violates unique constraint")
+    )
+
+    with caplog.at_level(logging.INFO):
+        await seed_global_dashboard_token(client)
+
+    # No misleading "bootstrap failed" WARNING.
+    assert not any(
+        "bootstrap failed" in record.message and record.levelno >= logging.WARNING
+        for record in caplog.records
+    ), "race-loser must not log a bootstrap failure warning"
+
+    # Should log at INFO that the row is already seeded.
+    assert any(
+        "idempotent-success" in record.message or "already seeded" in record.message
+        for record in caplog.records
+    ), "expected info log about the race winner's row"
+
+
+@pytest.mark.asyncio
 async def test_bootstrap_fail_open_on_db_exception(monkeypatch, caplog):
     monkeypatch.setenv(DASHBOARD_METRICS_TOKEN_ENV_VAR, RAW_TOKEN)
     client = MagicMock()
