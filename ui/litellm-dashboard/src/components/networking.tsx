@@ -1018,6 +1018,95 @@ export const teamDeleteCall = async (accessToken: string, teamID: string) => {
   }
 };
 
+/**
+ * Per-team dashboard-token types + API wrappers.
+ *
+ * Backed by /team/{team_id}/dashboard-token endpoints in
+ * litellm/proxy/management_endpoints/dashboard_token_management.py.
+ */
+export interface DashboardTokenMetadata {
+  label: string | null;
+  scope_type: string;
+  team_id: string | null;
+  created_at: string;
+  created_by: string | null;
+  token_hash_prefix: string;
+}
+
+export interface DashboardTokenReveal {
+  raw_token: string;
+  label: string | null;
+  scope_type: string;
+  team_id: string | null;
+  created_at: string;
+  warning: string;
+}
+
+export const getTeamDashboardTokenCall = async (
+  accessToken: string,
+  teamId: string,
+): Promise<DashboardTokenMetadata | null> => {
+  try {
+    return await apiClient.get<DashboardTokenMetadata>(`/team/${teamId}/dashboard-token`, {
+      accessToken,
+    });
+  } catch (error) {
+    const detail = (error as { body?: { detail?: { error?: string } } })?.body?.detail?.error;
+    if (detail === "no_live_dashboard_token") {
+      // 404 is a valid "no token yet" state, not an error.
+      return null;
+    }
+    console.error("Failed to fetch dashboard token:", error);
+    throw error;
+  }
+};
+
+export const createTeamDashboardTokenCall = async (
+  accessToken: string,
+  teamId: string,
+  label?: string,
+): Promise<DashboardTokenReveal> => {
+  try {
+    return await apiClient.post<DashboardTokenReveal>(`/team/${teamId}/dashboard-token`, {
+      accessToken,
+      body: { label: label ?? null },
+    });
+  } catch (error) {
+    console.error("Failed to create dashboard token:", error);
+    throw error;
+  }
+};
+
+export const rotateTeamDashboardTokenCall = async (
+  accessToken: string,
+  teamId: string,
+): Promise<DashboardTokenReveal> => {
+  try {
+    return await apiClient.post<DashboardTokenReveal>(`/team/${teamId}/dashboard-token/rotate`, {
+      accessToken,
+      body: {},
+    });
+  } catch (error) {
+    console.error("Failed to rotate dashboard token:", error);
+    throw error;
+  }
+};
+
+export const revokeTeamDashboardTokenCall = async (
+  accessToken: string,
+  teamId: string,
+): Promise<void> => {
+  try {
+    await apiClient.post(`/team/${teamId}/dashboard-token/revoke`, {
+      accessToken,
+      body: {},
+    });
+  } catch (error) {
+    console.error("Failed to revoke dashboard token:", error);
+    throw error;
+  }
+};
+
 export interface UserInfo {
   user_id: string;
   user_email: string;
