@@ -226,6 +226,36 @@ def test_401_with_revoked_token_same_body_as_unknown(client) -> None:
     assert r.json() == {"detail": {"error": "invalid dashboard token"}}
 
 
+def test_401_revoked_and_unknown_return_byte_identical_401(client) -> None:
+    """Regression guard: the status code AND the response body for revoked
+    and unknown tokens must be byte-identical.
+
+    This is the information-hiding invariant enforced by the single-query
+    shape in ``dashboard_bearer_token_auth``. If a future change splits
+    the query or adds a differentiating log/metric path, this test will
+    catch it before the behavioural drift reaches production.
+    """
+    tc, set_prisma = client
+    set_prisma(_mock_prisma(_make_find_many({}), {GLOBAL_HASH: _scope_row("global", label="Global")}))
+
+    r_unknown = tc.get(
+        "/dashboard-metrics/me",
+        headers={"Authorization": "Bearer unknown-token-cafebabe"},
+    )
+    r_revoked = tc.get(
+        "/dashboard-metrics/me",
+        headers={"Authorization": "Bearer previously-revoked-00000000"},
+    )
+
+    assert r_unknown.status_code == r_revoked.status_code == 401
+    # Byte-identical body — no additional fields, no differing error codes.
+    assert r_unknown.content == r_revoked.content, (
+        f"unknown={r_unknown.content!r} revoked={r_revoked.content!r}"
+    )
+    # And the body is the documented shape.
+    assert r_unknown.json() == {"detail": {"error": "invalid dashboard token"}}
+
+
 # ─── /me ─────────────────────────────────────────────────────────────────
 
 

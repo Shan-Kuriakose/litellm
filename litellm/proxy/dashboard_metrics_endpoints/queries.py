@@ -101,7 +101,16 @@ async def _resolve_api_key_filter(
     list for team scope (``[]`` is valid and means "no rows will match")."""
     if scope.scope_type == "global":
         return None
-    if scope.team_id is None:  # defensive; DB CHECK constraint forbids this
+    if scope.team_id is None:
+        # Defensive — the DB CHECK constraint ``LiteLLM_DashboardToken_scope_shape``
+        # forbids this combination at the write side. If we see it, something
+        # has tampered with the table directly (hand-SQL); loudly log instead
+        # of silently returning an empty filter.
+        verbose_proxy_logger.warning(
+            "DashboardScope with scope_type='team' but team_id is None — "
+            "data integrity issue: check LiteLLM_DashboardToken_scope_shape "
+            "CHECK constraint on this deployment"
+        )
         return []
     return await _resolve_team_api_keys(prisma_client, scope.team_id)
 

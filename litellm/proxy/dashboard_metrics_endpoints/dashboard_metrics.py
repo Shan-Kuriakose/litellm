@@ -104,9 +104,12 @@ async def users_metrics_route(
         raise
     except Exception as exc:
         verbose_proxy_logger.exception("dashboard-metrics /users failed: %s", exc)
+        # Do not surface ``exc`` to the caller — it can leak internal detail
+        # (table names, SQL fragments) to any authenticated caller. The full
+        # exception is still captured by verbose_proxy_logger above.
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": f"failed to fetch metrics: {exc}"},
+            detail={"error": "internal error"},
         ) from exc
 
 
@@ -127,7 +130,7 @@ async def pricing_gaps_route(
         verbose_proxy_logger.exception("dashboard-metrics /pricing-gaps failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": f"failed to fetch pricing gaps: {exc}"},
+            detail={"error": "internal error"},
         ) from exc
 
 
@@ -157,5 +160,5 @@ async def health_route(
         verbose_proxy_logger.exception("dashboard-metrics /health failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": f"failed to check health: {exc}"},
+            detail={"error": "internal error"},
         ) from exc

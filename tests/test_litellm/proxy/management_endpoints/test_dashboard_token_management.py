@@ -114,11 +114,14 @@ def _mock_prisma(
     dt_table.update = update
     prisma.db.litellm_dashboardtoken = dt_table
 
-    # transaction context manager (used by rotate)
+    # transaction context manager (used by rotate). The rotate handler's
+    # live-row lookup is INSIDE the tx (TOCTOU fix), so the tx-side table
+    # needs find_first too.
     @asynccontextmanager
     async def tx_cm():
         tx_table = MagicMock()
         tx_table.litellm_dashboardtoken = MagicMock()
+        tx_table.litellm_dashboardtoken.find_first = AsyncMock(return_value=live_token)
         tx_table.litellm_dashboardtoken.create = create
         tx_table.litellm_dashboardtoken.update = update
         yield tx_table

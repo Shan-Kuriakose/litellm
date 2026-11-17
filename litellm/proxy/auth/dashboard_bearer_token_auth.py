@@ -69,12 +69,19 @@ async def dashboard_bearer_token_auth(
             detail={"error": "database not connected"},
         )
 
+    # SECURITY — load-bearing single query.
+    # The ``revoked_at: None`` filter is what collapses "unknown hash" and
+    # "revoked hash" into a single code path with an identical 401 response.
+    # Do NOT split this into two queries (e.g. "fetch row, then check
+    # revoked") without replacing the information-hiding invariant some
+    # other way — a two-query shape would let timing distinguish the cases,
+    # and any added log line could leak existence of a revoked hash.
+    # See test_401_revoked_and_unknown_return_byte_identical_401 for the
+    # regression contract.
     row = await prisma_client.db.litellm_dashboardtoken.find_first(
         where={"token_hash": token_hash, "revoked_at": None}
     )
     if row is None:
-        # Collapses "unknown hash" and "revoked hash" into the same body —
-        # a caller cannot distinguish between them.
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"error": "invalid dashboard token"},

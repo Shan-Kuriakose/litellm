@@ -57,6 +57,24 @@ _LOG_EVENT_ROTATED: Final = "dashboard_token.rotated"
 _LOG_EVENT_REVOKED: Final = "dashboard_token.revoked"
 
 
+def _audit_task_done(task: asyncio.Task) -> None:
+    """Surface any exception from the fire-and-forget audit task.
+
+    Without this callback, an exception in ``create_audit_log_for_update``
+    would be silently swallowed by asyncio. We log at warning so the
+    operational signal is preserved; the HTTP response has already been
+    returned so the user is unaffected.
+    """
+    try:
+        exc = task.exception()
+    except (asyncio.CancelledError, asyncio.InvalidStateError):
+        return
+    if exc is not None:
+        verbose_proxy_logger.warning(
+            "dashboard-token audit log task failed: %s", exc
+        )
+
+
 # ─── Response models ─────────────────────────────────────────────────────
 
 
@@ -214,7 +232,8 @@ def _emit_audit_event(
         before_value=json.dumps(before, default=str) if before is not None else None,
         updated_values=json.dumps(after, default=str) if after is not None else None,
     )
-    asyncio.create_task(create_audit_log_for_update(request_data=payload))
+    task = asyncio.create_task(create_audit_log_for_update(request_data=payload))
+    task.add_done_callback(_audit_task_done)
 
 
 # ─── Routes ──────────────────────────────────────────────────────────────
@@ -266,15 +285,30 @@ async def create_team_dashboard_token(
 
     label = body.label or getattr(team, "team_alias", None)
     raw_token = _generate_raw_token()
-    row = await prisma_client.db.litellm_dashboardtoken.create(
-        data={
-            "token_hash": _hash(raw_token),
-            "team_id": team_id,
-            "scope_type": "team",
-            "label": label,
-            "created_by": user_api_key_dict.user_id,
-        }
-    )
+    try:
+        row = await prisma_client.db.litellm_dashboardtoken.create(
+            data={
+                "token_hash": _hash(raw_token),
+                "team_id": team_id,
+                "scope_type": "team",
+                "label": label,
+                "created_by": user_api_key_dict.user_id,
+            }
+        )
+    except Exception as create_exc:
+        # Two admins may have raced the pre-check → .create. The partial
+        # unique index ``one_live_per_team`` will have rejected the loser.
+        # Re-check live-row state; if it's now present, surface the proper
+        # 409 instead of the generic 500 the outer handler would emit.
+        if await _get_live_team_row(prisma_client, team_id) is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "live_dashboard_token_exists",
+                    "hint": "rotate or revoke the existing token first",
+                },
+            ) from create_exc
+        raise
     verbose_proxy_logger.info(
         "%s team_id=%s token_hash_prefix=%s created_by=%s",
         _LOG_EVENT_ISSUED,
@@ -308,23 +342,33 @@ async def rotate_team_dashboard_token(
     prisma_client = _get_prisma_client()
     await _assert_team_exists(prisma_client, team_id)
 
-    existing = await _get_live_team_row(prisma_client, team_id)
-    if existing is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "no_live_dashboard_token"},
-        )
-
     raw_token = _generate_raw_token()
     new_hash = _hash(raw_token)
     now = datetime.now(timezone.utc)
-    # Carry the label forward so rotation preserves the human-readable name.
-    label = existing.label
 
-    # Atomic: revoke old + insert new in one transaction. Prisma Python exposes
-    # ``db.tx()`` for this. The partial unique index would otherwise race a
-    # concurrent create attempt.
+    # Atomic: fetch live row + revoke it + insert new, all in one transaction.
+    # The live-row lookup lives INSIDE the tx so a concurrent rotate can't
+    # race us (TOCTOU) and leave stale state. The partial unique index
+    # ``one_live_per_team`` is the DB-level safety net; this layering closes
+    # the Python-level race window too.
     async with prisma_client.db.tx() as tx:
+        existing = await tx.litellm_dashboardtoken.find_first(
+            where={
+                "team_id": team_id,
+                "scope_type": "team",
+                "revoked_at": None,
+            }
+        )
+        if existing is None:
+            # Nothing to rotate — surfaces 404. Tx rolls back cleanly.
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"error": "no_live_dashboard_token"},
+            )
+
+        # Carry the label forward so rotation preserves the human-readable name.
+        label = existing.label
+
         await tx.litellm_dashboardtoken.update(
             where={"token_hash": existing.token_hash},
             data={"revoked_at": now},
@@ -405,6 +449,7 @@ async def revoke_team_dashboard_token(
             "team_id": team_id,
             "label": existing.label,
             "token_hash_prefix": str(existing.token_hash)[:8],
+            "created_at": _as_iso(existing.created_at),
         },
         after=None,
     )
