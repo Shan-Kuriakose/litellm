@@ -70,6 +70,21 @@ describe("DashboardAccessSection", () => {
     expect(screen.getByRole("button", { name: /Generate token/i })).toBeInTheDocument();
   });
 
+  it("renders error state with Retry when the metadata fetch fails", async () => {
+    // A real transport error (e.g. 500 from the proxy) must NOT silently
+    // render as the no-token state. Otherwise clicking Generate also
+    // 500s and the user hits a confusing double-error.
+    vi.mocked(getTeamDashboardTokenCall).mockRejectedValue(new Error("boom"));
+
+    renderWithProviders(<DashboardAccessSection {...makeProps()} />);
+
+    expect(await screen.findByText(/Failed to load dashboard token state/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Retry/i })).toBeInTheDocument();
+    // The Generate button must NOT appear in the error state — that would
+    // mislead the admin into thinking there's no token yet.
+    expect(screen.queryByRole("button", { name: /Generate token/i })).not.toBeInTheDocument();
+  });
+
   it("renders metadata and Rotate/Revoke when a live token exists", async () => {
     vi.mocked(getTeamDashboardTokenCall).mockResolvedValue(LIVE_METADATA);
 

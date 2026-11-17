@@ -98,6 +98,23 @@ export default function DashboardAccessSection({ teamId, teamAlias, accessToken 
 
   const metadata = metadataQuery.data ?? null;
   const metadataLoading = metadataQuery.isLoading;
+  // Distinguish "no token yet" (query returned null) from a real transport
+  // failure. Without this branch, a 500 from the proxy would silently
+  // render as the "Generate token" state — then Generate also 500s and the
+  // user hits a confusing double-error.
+  const metadataError = metadataQuery.isError;
+  // Derive a single render state so each JSX branch has a simple predicate.
+  type RenderState = "loading" | "error" | "empty" | "live";
+  let renderState: RenderState;
+  if (metadataLoading) {
+    renderState = "loading";
+  } else if (metadataError) {
+    renderState = "error";
+  } else if (metadata === null) {
+    renderState = "empty";
+  } else {
+    renderState = "live";
+  }
 
   return (
     <Card className="block p-6 overflow-y-auto mt-4">
@@ -108,9 +125,18 @@ export default function DashboardAccessSection({ teamId, teamAlias, accessToken 
         </p>
       </div>
 
-      {metadataLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+      {renderState === "loading" && <p className="text-sm text-muted-foreground">Loading…</p>}
 
-      {!metadataLoading && metadata === null && (
+      {renderState === "error" && (
+        <div className="flex items-center justify-between gap-4">
+          <p className="text-sm text-destructive">Failed to load dashboard token state.</p>
+          <Button variant="outline" onClick={() => void metadataQuery.refetch()}>
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {renderState === "empty" && (
         <div className="flex items-center justify-between gap-4">
           <p className="text-sm text-muted-foreground">
             This team has no dashboard token yet.
@@ -119,7 +145,7 @@ export default function DashboardAccessSection({ teamId, teamAlias, accessToken 
         </div>
       )}
 
-      {!metadataLoading && metadata !== null && (
+      {renderState === "live" && metadata !== null && (
         <div>
           <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm">
             <dt className="text-muted-foreground">Label</dt>
