@@ -1,26 +1,37 @@
-"""Shared-bearer-token auth for /dashboard-metrics/*.
+"""Bearer-token auth for /dashboard-metrics/*.
+
+Hashes the incoming bearer with SHA-256 and looks it up in the
+``LiteLLM_DashboardToken`` table. Returns a ``DashboardScope`` describing
+whether the caller holds a global or team-scoped token.
 
 Deliberately separate from ``user_api_key_auth`` (which validates virtual
-keys against the DB) and from the master-key check: the dashboard is an
-external caller with no LiteLLM-user identity, and rotating its token
-should not require touching the virtual-key or master-key systems.
+keys) and from the master-key check: dashboard consumers are external
+callers with no LiteLLM-user identity, and rotating their tokens should
+not require touching the virtual-key or master-key systems.
 
-Configuration: set ``DASHBOARD_METRICS_TOKEN`` in the proxy environment.
-If the env var is unset the dependency fails closed (401), so a
-misconfigured proxy cannot accidentally expose the metrics routes.
+Two distinct 401 bodies:
+  * header-shape failures (missing / non-Bearer / empty credential)
+  * token-resolution failures (hash not present OR hash present but
+    ``revoked_at IS NOT NULL``) → **identical** response for both
+    sub-cases, so an attacker cannot confirm whether a specific token
+    hash exists in the table.
 """
 
 from __future__ import annotations
 
-import hmac
-import os
+import hashlib
 from typing import Final, Optional
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from litellm._logging import verbose_proxy_logger
+from litellm.proxy.auth.dashboard_scope import DashboardScope
 
+# Retained for backward compatibility with any external imports (e.g. tests or
+# ops scripts that referenced the env var). The bootstrap hook in
+# ``dashboard_metrics_endpoints/bootstrap.py`` is the only remaining reader
+# of the env var itself; request-time auth no longer consults it.
 DASHBOARD_METRICS_TOKEN_ENV_VAR: Final = "DASHBOARD_METRICS_TOKEN"
 
 _bearer_scheme: Final = HTTPBearer(auto_error=False)
@@ -30,29 +41,48 @@ _UNAUTH_HEADERS: Final = {"WWW-Authenticate": "Bearer"}
 
 async def dashboard_bearer_token_auth(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
-) -> None:
-    expected = os.getenv(DASHBOARD_METRICS_TOKEN_ENV_VAR)
-    if not expected:
-        verbose_proxy_logger.warning(
-            "%s is not set — /dashboard-metrics/* routes are rejecting all requests.",
-            DASHBOARD_METRICS_TOKEN_ENV_VAR,
-        )
+) -> DashboardScope:
+    if (
+        credentials is None
+        or credentials.scheme.lower() != "bearer"
+        or not credentials.credentials
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "dashboard metrics endpoint not configured"},
+            detail={"error": "missing bearer token"},
             headers=_UNAUTH_HEADERS,
         )
 
-    if credentials is None or credentials.scheme.lower() != "bearer":
+    token_hash = hashlib.sha256(credentials.credentials.encode()).hexdigest()
+
+    # Lazy import matches the pattern used throughout the proxy
+    # (e.g. customer_endpoints.py, dashboard_metrics.py) so this module
+    # can be imported before the global ``prisma_client`` is initialized.
+    from litellm.proxy.proxy_server import prisma_client
+
+    if prisma_client is None:
+        verbose_proxy_logger.error(
+            "dashboard_bearer_token_auth called before prisma_client is initialized"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "database not connected"},
+        )
+
+    row = await prisma_client.db.litellm_dashboardtoken.find_first(
+        where={"token_hash": token_hash, "revoked_at": None}
+    )
+    if row is None:
+        # Collapses "unknown hash" and "revoked hash" into the same body —
+        # a caller cannot distinguish between them.
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "missing or invalid Authorization header"},
+            detail={"error": "invalid dashboard token"},
             headers=_UNAUTH_HEADERS,
         )
 
-    if not hmac.compare_digest(credentials.credentials, expected):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "invalid token"},
-            headers=_UNAUTH_HEADERS,
-        )
+    return DashboardScope(
+        scope_type=row.scope_type,
+        team_id=row.team_id,
+        label=row.label,
+    )

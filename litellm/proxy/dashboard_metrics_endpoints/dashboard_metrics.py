@@ -1,10 +1,23 @@
 """HTTP routes for /dashboard-metrics/*.
 
-Three routes, all gated on the same shared bearer token:
+Four routes, all gated on the same shared bearer token (resolved via
+``dashboard_bearer_token_auth`` which returns a ``DashboardScope``):
 
   GET /dashboard-metrics/users?from=YYYY-MM-DD&to=YYYY-MM-DD&granularity=day
   GET /dashboard-metrics/pricing-gaps?from=YYYY-MM-DD&to=YYYY-MM-DD
+  GET /dashboard-metrics/me
   GET /dashboard-metrics/health
+
+Scope handling:
+  * ``scope_type == 'global'`` → ``/users`` and ``/pricing-gaps`` return
+    data for every ``end_user_id``.
+  * ``scope_type == 'team'`` → the queries filter ``LiteLLM_DailyEndUserSpend``
+    rows to those whose ``api_key`` belongs to the scoped team (resolved
+    via ``LiteLLM_VerificationToken.team_id``).
+
+``/health`` is intentionally **not** scope-filtered — it reports overall
+pipeline freshness, which a team with no recent activity should not be
+able to show as "stale".
 """
 
 from __future__ import annotations
@@ -16,14 +29,19 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from litellm._logging import verbose_proxy_logger
 from litellm.proxy.auth.dashboard_bearer_token_auth import dashboard_bearer_token_auth
+from litellm.proxy.auth.dashboard_scope import DashboardScope
 
 from .queries import get_health, get_pricing_gaps, get_user_metrics
-from .schemas import HealthResponse, PricingGapsResponse, UsersMetricsResponse
+from .schemas import (
+    HealthResponse,
+    PricingGapsResponse,
+    ScopeResponse,
+    UsersMetricsResponse,
+)
 
 router: Final = APIRouter(
     prefix="/dashboard-metrics",
     tags=["dashboard-metrics"],
-    dependencies=[Depends(dashboard_bearer_token_auth)],
 )
 
 _ALLOWED_GRANULARITIES: Final = frozenset({"day", "week", "month"})
@@ -70,6 +88,7 @@ async def users_metrics_route(
     start: Annotated[str, Query(alias="from")],
     end: Annotated[str, Query(alias="to")],
     granularity: str = "day",
+    scope: DashboardScope = Depends(dashboard_bearer_token_auth),
 ) -> UsersMetricsResponse:
     start, end = _validate_window(start, end)
     if granularity not in _ALLOWED_GRANULARITIES:
@@ -80,7 +99,7 @@ async def users_metrics_route(
 
     prisma_client = _get_prisma_client()
     try:
-        return await get_user_metrics(prisma_client, start, end, granularity)
+        return await get_user_metrics(prisma_client, start, end, granularity, scope)
     except HTTPException:
         raise
     except Exception as exc:
@@ -95,12 +114,13 @@ async def users_metrics_route(
 async def pricing_gaps_route(
     start: Annotated[str, Query(alias="from")],
     end: Annotated[str, Query(alias="to")],
+    scope: DashboardScope = Depends(dashboard_bearer_token_auth),
 ) -> PricingGapsResponse:
     start, end = _validate_window(start, end)
 
     prisma_client = _get_prisma_client()
     try:
-        return await get_pricing_gaps(prisma_client, start, end)
+        return await get_pricing_gaps(prisma_client, start, end, scope)
     except HTTPException:
         raise
     except Exception as exc:
@@ -111,8 +131,23 @@ async def pricing_gaps_route(
         ) from exc
 
 
+@router.get("/me", response_model=ScopeResponse)
+async def me_route(
+    scope: DashboardScope = Depends(dashboard_bearer_token_auth),
+) -> ScopeResponse:
+    # Default label for a global row seeded without one; team rows should
+    # always have a label set when issued via the admin UI.
+    label = scope.label or ("Global" if scope.scope_type == "global" else "")
+    return ScopeResponse(scope_type=scope.scope_type, label=label)
+
+
 @router.get("/health", response_model=HealthResponse)
-async def health_route() -> HealthResponse:
+async def health_route(
+    scope: DashboardScope = Depends(dashboard_bearer_token_auth),
+) -> HealthResponse:
+    # Scope is required (authenticated route) but intentionally not used —
+    # /health reports overall rollup freshness regardless of scope.
+    del scope  # explicit acknowledgment, satisfies linters
     prisma_client = _get_prisma_client()
     try:
         return await get_health(prisma_client)

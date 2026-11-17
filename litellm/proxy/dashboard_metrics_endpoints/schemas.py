@@ -104,4 +104,9 @@ class HealthResponse(BaseModel):
     checkedAt: str
 
 
+class ScopeResponse(BaseModel):
+    scope_type: Literal["global", "team"]
+    label: str
+
+
 KPI_KEYS: Final = ("cost", "activeUsers", "requests", "tokens", "avgLatencyMs")

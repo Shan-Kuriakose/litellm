@@ -241,6 +241,7 @@ class LitellmTableNames(str, enum.Enum):
     SSO_CONFIG_TABLE_NAME = "LiteLLM_SSOConfig"
     UI_SETTINGS_TABLE_NAME = "LiteLLM_UISettings"
     AGENT_TABLE_NAME = "LiteLLM_AgentsTable"
+    DASHBOARD_TOKEN_TABLE_NAME = "LiteLLM_DashboardToken"
 
 
 class Litellm_EntityType(enum.Enum):
