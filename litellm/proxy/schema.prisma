@@ -158,6 +158,7 @@ model LiteLLM_TeamTable {
     litellm_model_table LiteLLM_ModelTable? @relation(fields: [model_id], references: [id])
     object_permission LiteLLM_ObjectPermissionTable?   @relation(fields: [object_permission_id], references: [object_permission_id])
     projects LiteLLM_ProjectTable[]
+    dashboard_tokens LiteLLM_DashboardToken[]
 
     @@index([organization_id])
     @@index([team_alias])
@@ -1815,4 +1816,22 @@ model LiteLLM_WorkflowMessage {
 
   @@unique([run_id, sequence_number])
   @@index([run_id])
+}
+
+// Hashed bearer tokens used by external dashboards to call /dashboard-metrics/*.
+// Stores sha256(raw_token) only; the raw string is never persisted.
+// Partial unique indexes (declared in the matching migration) enforce
+// "at most one live token per team" and "at most one live global token."
+model LiteLLM_DashboardToken {
+  token_hash  String    @id
+  team_id     String?
+  scope_type  String
+  label       String?
+  created_at  DateTime  @default(now())
+  created_by  String?
+  revoked_at  DateTime?
+
+  team LiteLLM_TeamTable? @relation(fields: [team_id], references: [team_id], onDelete: Cascade)
+
+  @@index([team_id])
 }

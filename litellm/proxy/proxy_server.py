@@ -1492,6 +1492,13 @@ async def proxy_startup_event(app: FastAPI) -> AsyncGenerator[None, None]:
         ## SYNC UI SETTINGS ##
         await ProxyStartupEvent._sync_ui_settings_to_general_settings()
 
+        ## SEED GLOBAL DASHBOARD TOKEN ROW ##
+        from litellm.proxy.dashboard_metrics_endpoints.bootstrap import (
+            seed_global_dashboard_token,
+        )
+
+        await seed_global_dashboard_token(prisma_client)
+
     # Start background health checks AFTER models are loaded and index is built
     if use_background_health_checks:
         asyncio.create_task(_run_background_health_check())  # start the background health check coroutine.
