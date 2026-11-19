@@ -112,6 +112,7 @@ import NumericalInput from "../shared/numerical_input";
 import VectorStoreSelector from "../vector_store_management/VectorStoreSelector";
 import SearchToolSelector from "../search_tools/SearchToolSelector";
 import SkillSelector from "../skills/SkillSelector";
+import DashboardAccessSection from "./DashboardAccessSection";
 import EditLoggingSettings from "./EditLoggingSettings";
 import RouterSettingsAccordion, { RouterSettingsAccordionRef } from "../common_components/RouterSettingsAccordion";
 import { RouterWeightsSummary } from "../common_components/RouterSettingsSummary";
@@ -2732,6 +2733,13 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
                 </div>
               )}
             </div>
+          )}
+          {is_proxy_admin && (
+            <DashboardAccessSection
+              teamId={info.team_id}
+              teamAlias={info.team_alias ?? null}
+              accessToken={accessToken}
+            />
           )}
         </Card>
       ),
