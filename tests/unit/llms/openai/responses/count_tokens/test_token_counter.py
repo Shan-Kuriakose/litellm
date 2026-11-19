@@ -148,9 +148,14 @@ async def test_null_count_payload_falls_back_to_local_counting(monkeypatch: pyte
 
 
 @pytest.mark.asyncio
+async def test_server_without_the_count_endpoint_falls_back_to_local_counting(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert await _count(monkeypatch, httpx.Response(405, json={"detail": "Method Not Allowed"})) is None
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("upstream_status", "upstream_text"),
-    [(429, "rate limit exceeded"), (403, "forbidden"), (408, "Request timed out")],
+    [(429, "rate limit exceeded"), (403, "forbidden"), (408, "Request timed out"), (404, "model not found")],
 )
 async def test_upstream_error_status_becomes_an_error_response_with_that_status_and_text(
     monkeypatch: pytest.MonkeyPatch, upstream_status: int, upstream_text: str
