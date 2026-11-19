@@ -453,3 +453,15 @@ def test_no_audit_on_rotate_when_nothing_live(app_and_prisma) -> None:
     r = tc.post(f"/team/{TEAM_ID}/dashboard-token/rotate")
     assert r.status_code == 404
     assert audit_calls == []
+
+
+def test_admin_routes_are_served_by_the_proxy_app() -> None:
+    from litellm.proxy.proxy_server import app
+
+    served = {(route.path, method) for route in app.routes for method in getattr(route, "methods", ())}
+    assert {
+        ("/team/{team_id}/dashboard-token", "GET"),
+        ("/team/{team_id}/dashboard-token", "POST"),
+        ("/team/{team_id}/dashboard-token/rotate", "POST"),
+        ("/team/{team_id}/dashboard-token/revoke", "POST"),
+    } <= served

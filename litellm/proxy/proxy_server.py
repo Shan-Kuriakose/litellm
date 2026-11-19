@@ -869,6 +869,7 @@ from litellm.proxy.management_helpers.team_metadata_validation import (
     parse_team_metadata_schema,
 )
 from litellm.proxy.dashboard_metrics_endpoints import dashboard_metrics_router
+from litellm.proxy.management_endpoints.dashboard_token_management import router as dashboard_token_router
 from litellm.proxy.mcp_server.byok_credential_cache import byok_credential_cache
 from litellm.proxy.mcp_server.catalog import public_catalog_operation
 from litellm.proxy.mcp_server.stdio_gate import MCP_STDIO_ENABLED_ENV_VAR, is_mcp_stdio_flag_key
@@ -22543,6 +22544,7 @@ app.include_router(debugging_endpoints_router)
 app.include_router(rust_control_plane_router)
 app.include_router(ui_crud_endpoints_router)
 app.include_router(dashboard_metrics_router)
+app.include_router(dashboard_token_router)
 app.include_router(moyai_router)
 app.include_router(user_banner_endpoints_router)
 app.include_router(latest_release_endpoints_router)
