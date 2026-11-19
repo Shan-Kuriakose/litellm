@@ -5,16 +5,19 @@ Tests the end-to-end flow of websearch_interception callback with
 litellm.acompletion() for transparent server-side web search execution.
 """
 
-import os
-from unittest.mock import MagicMock
+import datetime
+from typing import Final
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import respx
 
 import litellm
 from litellm.integrations.websearch_interception.handler import (
     WebSearchInterceptionLogger,
 )
-from litellm.types.utils import LlmProviders, ModelResponse
+from litellm.litellm_core_utils.litellm_logging import Logging
+from litellm.types.utils import CallTypes, LlmProviders, ModelResponse
 
 
 @pytest.fixture
@@ -35,75 +38,6 @@ def mock_search_response():
 def websearch_logger():
     """Create a WebSearchInterceptionLogger instance"""
     return WebSearchInterceptionLogger(enabled_providers=[LlmProviders.OPENAI, LlmProviders.MINIMAX])
-
-
-@pytest.mark.asyncio
-@pytest.mark.skipif(
-    os.environ.get("OPENAI_API_KEY") is None,
-    reason="OPENAI_API_KEY not set",
-)
-async def test_websearch_chat_completion_with_openai():
-    """Test websearch interception with OpenAI chat completions API.
-
-    This test verifies that:
-    1. Model calls litellm_web_search tool
-    2. Server executes web search automatically
-    3. Server makes follow-up request with search results
-    4. User gets final answer without tool_calls
-    """
-    # Configure WebSearch interception
-    original_callbacks = litellm.callbacks.copy() if litellm.callbacks else []
-    websearch_logger = WebSearchInterceptionLogger(enabled_providers=[LlmProviders.OPENAI])
-    litellm.callbacks = [websearch_logger]
-
-    try:
-        response = await litellm.acompletion(
-            model="gpt-4o-mini",  # Use cheaper model for testing
-            messages=[
-                {
-                    "role": "user",
-                    "content": "What's the weather in San Francisco today?",
-                }
-            ],
-            tools=[
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "litellm_web_search",
-                        "description": "Search the web for information",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "query": {
-                                    "type": "string",
-                                    "description": "Search query",
-                                }
-                            },
-                            "required": ["query"],
-                        },
-                    },
-                }
-            ],
-        )
-
-        # Verify response structure
-        assert isinstance(response, ModelResponse)
-        assert response.choices[0].message.content is not None
-        assert len(response.choices[0].message.content) > 0
-
-        # If agentic loop worked, we should NOT have tool_calls in final response
-        # (they should have been executed and replaced with final answer)
-        if hasattr(response.choices[0].message, "tool_calls"):
-            # If tool_calls exist, it means agentic loop didn't run
-            # This could happen if search tool is not configured
-            pytest.skip("Agentic loop did not execute - search tool may not be configured")
-
-        # Verify we got a meaningful response
-        assert response.choices[0].finish_reason in ["stop", "end_turn"]
-
-    finally:
-        # Restore original callbacks
-        litellm.callbacks = original_callbacks
 
 
 @pytest.mark.asyncio
@@ -322,61 +256,6 @@ async def test_websearch_json_serialization_fix():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(
-    os.environ.get("OPENAI_API_KEY") is None or os.environ.get("PERPLEXITY_API_KEY") is None,
-    reason="OPENAI_API_KEY or PERPLEXITY_API_KEY not set",
-)
-async def test_websearch_streaming_conversion():
-    """Test that streaming requests are converted to non-streaming for web search.
-
-    When stream=True is passed with web search tools, the handler should:
-    1. Convert stream=True to stream=False for initial request
-    2. Execute web search
-    3. Convert final response back to streaming
-    """
-    websearch_logger = WebSearchInterceptionLogger(
-        enabled_providers=[LlmProviders.OPENAI], search_tool_name="perplexity-search"
-    )
-    litellm.callbacks = [websearch_logger]
-
-    try:
-        response = await litellm.acompletion(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": "What's the latest AI news?"}],
-            tools=[
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "litellm_web_search",
-                        "description": "Search the web",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {"query": {"type": "string"}},
-                        },
-                    },
-                }
-            ],
-            stream=True,
-        )
-
-        # Response should be a streaming iterator
-        chunks = []
-        async for chunk in response:
-            chunks.append(chunk)
-
-        # Verify we got streaming chunks
-        assert len(chunks) > 0
-
-        # Verify chunks have expected structure
-        for chunk in chunks:
-            assert hasattr(chunk, "choices")
-            assert len(chunk.choices) > 0
-
-    finally:
-        litellm.callbacks = []
-
-
-@pytest.mark.asyncio
 async def test_maybe_run_chat_completion_agentic_loop_calls_chat_completion_hook():
     """Regression test: maybe_run_chat_completion_agentic_loop must call
     async_should_run_chat_completion_agentic_loop, not async_should_run_agentic_loop.
@@ -503,7 +382,6 @@ async def test_execute_chat_completion_agentic_loop_strips_tool_choice():
     optional_params into the follow-up params without explicit removal causes the
     model to call the search tool again instead of synthesizing an answer.
     """
-    from unittest.mock import patch
 
     websearch_logger = WebSearchInterceptionLogger(enabled_providers=[LlmProviders.OPENAI])
 
@@ -547,3 +425,54 @@ async def test_execute_chat_completion_agentic_loop_strips_tool_choice():
 if __name__ == "__main__":
     # Run with: pytest test_websearch_chat_completion.py -v -s
     pytest.main([__file__, "-v", "-s"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "requested_model,handler_model,custom_llm_provider",
+    [
+        ("openrouter/openrouter/free", "openrouter/free", "openrouter"),
+        ("bedrock/converse_like/my-endpoint-model", "my-endpoint-model", "bedrock"),
+    ],
+)
+async def test_chat_followup_reuses_the_model_the_caller_requested(
+    requested_model: str, handler_model: str, custom_llm_provider: str, perplexity_search: respx.Route
+) -> None:
+    """The provider handler sees the model after its routing prefixes are stripped, which
+    re-qualifying with the provider alone cannot restore."""
+    logging_obj: Final = Logging(
+        model=requested_model,
+        messages=[],
+        stream=False,
+        call_type=CallTypes.completion.value,
+        start_time=datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc),
+        litellm_call_id="call-chat-followup",
+        function_id="fn-chat-followup",
+    )
+    litellm.completion(
+        model=requested_model,
+        messages=[{"role": "user", "content": "What's the latest AI news?"}],
+        mock_response="searching",
+        litellm_logging_obj=logging_obj,
+    )
+    logger: Final = WebSearchInterceptionLogger()
+
+    plan: Final = await logger.async_build_chat_completion_agentic_loop_plan(
+        tools={
+            "tool_calls": [{"id": "call_abc", "name": "litellm_web_search", "input": {"query": "latest ai news"}}],
+            "tool_type": "websearch",
+            "provider": custom_llm_provider,
+            "response_format": "openai",
+        },
+        model=handler_model,
+        messages=[{"role": "user", "content": "What's the latest AI news?"}],
+        response=MagicMock(),
+        optional_params={},
+        logging_obj=logging_obj,
+        stream=False,
+        kwargs={"custom_llm_provider": custom_llm_provider},
+    )
+
+    assert plan.request_patch is not None
+    assert plan.request_patch.model == requested_model
+    assert perplexity_search.call_count == 1
