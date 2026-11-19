@@ -295,6 +295,9 @@ class OpenAITokenCounter(BaseTokenCounter):
                     }
                 )
         except OpenAIError as e:
+            if e.status_code == 405:
+                verbose_logger.debug("OpenAI CountTokens API not served by %s, counting locally", resolved.api_base)
+                return None
             verbose_logger.warning("OpenAI CountTokens API error: status=%s, message=%s", e.status_code, e.message)
             return _count_error(model_to_use, request_model, e.message, e.status_code)
         except openai.AuthenticationError as e:
