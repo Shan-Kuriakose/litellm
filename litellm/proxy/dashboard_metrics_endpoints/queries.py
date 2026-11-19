@@ -14,6 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 from litellm._logging import verbose_proxy_logger
+from litellm.proxy.auth.dashboard_scope import DashboardScope
 
 from .schemas import (
     Coverage,
@@ -56,11 +57,62 @@ def _previous_window(start: str, end: str) -> tuple[str, str]:
     return prev_start.isoformat(), prev_end.isoformat()
 
 
-async def _fetch_rows(prisma_client: Any, start: str, end: str) -> list[Any]:
+async def _resolve_team_api_keys(prisma_client: Any, team_id: str) -> list[str]:
+    """Return the hashed-token list for every virtual key owned by ``team_id``.
+
+    The daily rollup table has no ``team_id`` column, so team scoping is
+    applied by joining via ``LiteLLM_VerificationToken.token = LiteLLM_DailyEndUserSpend.api_key``.
+    See claude-dashboard/docs/per-team-dashboard/08-decisions.md D-23.
+    """
+    tokens = await prisma_client.db.litellm_verificationtoken.find_many(
+        where={"team_id": team_id},
+    )
+    return [t.token for t in tokens]
+
+
+async def _fetch_rows(
+    prisma_client: Any,
+    start: str,
+    end: str,
+    api_key_filter: Optional[list[str]] = None,
+) -> list[Any]:
+    """Fetch rollup rows in [start, end]. If ``api_key_filter`` is a non-None
+    list, restrict to rows whose ``api_key`` is in the list; an empty list
+    short-circuits to ``[]`` since no row can match.
+    """
+    if api_key_filter is not None and not api_key_filter:
+        return []
+
+    where: dict[str, Any] = {"date": {"gte": start, "lte": end}}
+    if api_key_filter is not None:
+        where["api_key"] = {"in": api_key_filter}
+
     return await prisma_client.db.litellm_dailyenduserspend.find_many(
-        where={"date": {"gte": start, "lte": end}},
+        where=where,
         order=[{"date": "desc"}, {"id": "asc"}],
     )
+
+
+async def _resolve_api_key_filter(
+    prisma_client: Any,
+    scope: DashboardScope,
+) -> Optional[list[str]]:
+    """Return ``None`` for global scope (no filter); the team's hashed-token
+    list for team scope (``[]`` is valid and means "no rows will match")."""
+    if scope.scope_type == "global":
+        return None
+    if scope.team_id is None:
+        # Defensive — the DB CHECK constraint ``LiteLLM_DashboardToken_scope_shape``
+        # forbids this combination at the write side. If we see it, something
+        # has tampered with the table directly (hand-SQL); loudly log instead
+        # of silently returning an empty filter.
+        verbose_proxy_logger.warning(
+            "DashboardScope with scope_type='team' but team_id is None — "
+            "data integrity issue: check LiteLLM_DashboardToken_scope_shape "
+            "CHECK constraint on this deployment"
+        )
+        return []
+    return await _resolve_team_api_keys(prisma_client, scope.team_id)
 
 
 def _summarize(rows: list[Any]) -> dict[str, float]:
@@ -268,10 +320,12 @@ async def get_user_metrics(
     start: str,
     end: str,
     granularity: str,
+    scope: DashboardScope,
 ) -> UsersMetricsResponse:
-    current_rows = await _fetch_rows(prisma_client, start, end)
+    api_key_filter = await _resolve_api_key_filter(prisma_client, scope)
+    current_rows = await _fetch_rows(prisma_client, start, end, api_key_filter)
     prev_start, prev_end = _previous_window(start, end)
-    previous_rows = await _fetch_rows(prisma_client, prev_start, prev_end)
+    previous_rows = await _fetch_rows(prisma_client, prev_start, prev_end, api_key_filter)
 
     current = _summarize(current_rows)
     previous = _summarize(previous_rows)
@@ -291,8 +345,10 @@ async def get_pricing_gaps(
     prisma_client: Any,
     start: str,
     end: str,
+    scope: DashboardScope,
 ) -> PricingGapsResponse:
-    rows = await _fetch_rows(prisma_client, start, end)
+    api_key_filter = await _resolve_api_key_filter(prisma_client, scope)
+    rows = await _fetch_rows(prisma_client, start, end, api_key_filter)
     by_key: dict[tuple[str, Optional[str]], dict[str, Any]] = {}
     for r in rows:
         key = (r.model or "unknown", r.custom_llm_provider)
