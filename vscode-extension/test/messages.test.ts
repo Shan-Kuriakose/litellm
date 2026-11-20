@@ -131,6 +131,7 @@ describe("buildChatCompletionParams", () => {
       messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
       stream: true,
       stream_options: { include_usage: true },
+      max_tokens: 8192,
     });
   });
 

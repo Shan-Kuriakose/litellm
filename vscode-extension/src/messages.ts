@@ -166,12 +166,20 @@ const toTool = (tool: vscode.LanguageModelChatTool): ChatCompletionTool => ({
 });
 
 const NUMERIC_OPTIONS = ["temperature", "top_p", "max_tokens", "presence_penalty", "frequency_penalty", "seed"] as const;
+const MAX_TOKENS_SAFETY_CEILING = 64_000;
+const DEFAULT_MAX_TOKENS = 8_192;
+
+/* Defensive clamp against upstream telling us an implausible max_tokens
+ * (see models.ts sanitizeMaxOutputTokens). Caps at a generous ceiling that
+ * still accommodates realistic high-output reasoning models. */
+const clampForwarded = (key: string, value: number): number =>
+  key === "max_tokens" && value > MAX_TOKENS_SAFETY_CEILING ? MAX_TOKENS_SAFETY_CEILING : value;
 
 const forwardedModelOptions = (modelOptions: { readonly [key: string]: unknown }): Record<string, number> =>
   Object.fromEntries(
     NUMERIC_OPTIONS.flatMap((key) => {
       const value = modelOptions[key];
-      return typeof value === "number" ? [[key, value] as const] : [];
+      return typeof value === "number" ? [[key, clampForwarded(key, value)] as const] : [];
     }),
   );
 
@@ -180,6 +188,7 @@ export const buildChatCompletionParams = (input: ChatRequestInput): ChatCompleti
   messages: [...toChatCompletionMessages(input.messages)],
   stream: true,
   stream_options: { include_usage: true },
+  max_tokens: DEFAULT_MAX_TOKENS,
   ...forwardedModelOptions(input.modelOptions),
   ...(input.tools.length === 0 ? {} : { tools: input.tools.map(toTool) }),
   ...(input.tools.length === 0 || !input.requireToolCall ? {} : { tool_choice: "required" }),

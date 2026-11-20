@@ -48,6 +48,23 @@ export const REASONING_EFFORT_KEY = "reasoningEffort";
 export const GATEWAY_DEFAULT_EFFORT = "default";
 export const ASSUMED_MAX_INPUT_TOKENS = 128000;
 export const ASSUMED_MAX_OUTPUT_TOKENS = 4096;
+const MAX_PLAUSIBLE_OUTPUT_TOKENS = 128_000;
+
+/* Some LiteLLM deployments report the backend's full context window as
+ * max_output_tokens (openai_like/model_info.py synthesizes it when the
+ * config leaves the field unset). Treat values that exceed a plausible
+ * output cap, or that equal/exceed the input cap, as unknown so the
+ * extension falls back to ASSUMED_MAX_OUTPUT_TOKENS. */
+const sanitizeMaxOutputTokens = (
+  maxOutput: number | undefined,
+  maxInput: number | undefined,
+): number | undefined => {
+  if (maxOutput === undefined) return undefined;
+  if (maxOutput > MAX_PLAUSIBLE_OUTPUT_TOKENS) return undefined;
+  if (maxInput !== undefined && maxOutput >= maxInput) return undefined;
+  return maxOutput;
+};
+
 export const MARKDOWN_LINE_BREAK = "  \n";
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
@@ -69,7 +86,10 @@ const parseGroup = (value: unknown): ModelGroupInfo | undefined => {
     providers: stringList(value.providers),
     mode: optionalString(value.mode),
     maxInputTokens: optionalNumber(value.max_input_tokens),
-    maxOutputTokens: optionalNumber(value.max_output_tokens),
+    maxOutputTokens: sanitizeMaxOutputTokens(
+      optionalNumber(value.max_output_tokens),
+      optionalNumber(value.max_input_tokens),
+    ),
     inputCostPerToken: optionalNumber(value.input_cost_per_token),
     outputCostPerToken: optionalNumber(value.output_cost_per_token),
     supportsVision: value.supports_vision === true,
