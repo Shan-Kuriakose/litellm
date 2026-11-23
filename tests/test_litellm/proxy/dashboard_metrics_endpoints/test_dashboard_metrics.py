@@ -61,11 +61,11 @@ def _scope_row(scope_type: str, team_id: Optional[str] = None, label: Optional[s
 
 
 def _row(**overrides: Any) -> SimpleNamespace:
-    """Build a minimal ``LiteLLM_DailyEndUserSpend`` row."""
+    """Build a minimal ``LiteLLM_DailyUserSpend`` row."""
     now = datetime.now(timezone.utc)
     defaults: dict[str, Any] = dict(
-        id=f"rid-{overrides.get('date','x')}-{overrides.get('model','m')}-{overrides.get('end_user_id','u')}",
-        end_user_id="user@example.com",
+        id=f"rid-{overrides.get('date','x')}-{overrides.get('model','m')}-{overrides.get('user_id','u')}",
+        user_id="user@example.com",
         date="2026-11-05",
         api_key="sk-test",
         model="gpt-4o",
@@ -130,7 +130,7 @@ def _mock_prisma(
 ) -> MagicMock:
     """Build a MagicMock prisma client with three configured sub-tables.
 
-    * ``litellm_dailyenduserspend.find_many`` → the given ``find_many``.
+    * ``litellm_dailyuserspend.find_many`` → the given ``find_many``.
     * ``litellm_dashboardtoken.find_first`` → looks up the given hash map.
       Returns ``None`` (unknown/revoked) or the matching scope row.
     * ``litellm_verificationtoken.find_many`` → returns rows for the given
@@ -140,7 +140,7 @@ def _mock_prisma(
 
     spend_table = MagicMock()
     spend_table.find_many = find_many
-    prisma.db.litellm_dailyenduserspend = spend_table
+    prisma.db.litellm_dailyuserspend = spend_table
 
     hashes = scope_rows_by_hash or {}
 
@@ -301,7 +301,7 @@ def test_users_returns_200_and_correct_shape(client) -> None:
             spend=2.0,
             api_requests=20,
             successful_requests=20,
-            end_user_id="alice@example.com",
+            user_id="alice@example.com",
         ),
     ]
     find_many = _make_find_many(
@@ -433,7 +433,7 @@ def test_users_team_scope_filters_by_team_api_keys(client) -> None:
             spend=2.0,
             api_requests=20,
             successful_requests=20,
-            end_user_id="alice@example.com",
+            user_id="alice@example.com",
         ),
         _row(
             date="2026-11-04",
@@ -441,7 +441,7 @@ def test_users_team_scope_filters_by_team_api_keys(client) -> None:
             spend=100.0,
             api_requests=1000,
             successful_requests=1000,
-            end_user_id="stranger@example.com",
+            user_id="stranger@example.com",
         ),
     ]
     find_many = _make_find_many(
