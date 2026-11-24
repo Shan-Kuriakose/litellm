@@ -10,8 +10,8 @@ Four routes, all gated on the same shared bearer token (resolved via
 
 Scope handling:
   * ``scope_type == 'global'`` → ``/users`` and ``/pricing-gaps`` return
-    data for every ``end_user_id``.
-  * ``scope_type == 'team'`` → the queries filter ``LiteLLM_DailyEndUserSpend``
+    data for every ``user_id``.
+  * ``scope_type == 'team'`` → the queries filter ``LiteLLM_DailyUserSpend``
     rows to those whose ``api_key`` belongs to the scoped team (resolved
     via ``LiteLLM_VerificationToken.team_id``).
 

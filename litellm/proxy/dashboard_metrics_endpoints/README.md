@@ -2,9 +2,10 @@
 
 Bearer-token-authenticated, read-only HTTP surface exposing per-user
 LiteLLM usage in a shape suited to external dashboards. Reads directly
-from `LiteLLM_DailyEndUserSpend`, which the proxy's background writer
+from `LiteLLM_DailyUserSpend`, which the proxy's background writer
 refreshes every ~10–15 s (`PROXY_BATCH_WRITE_AT = 10` in
-`litellm/constants.py`).
+`litellm/constants.py`). Every request writes to this table; the
+`user_id` column carries the virtual key's owner identity.
 
 ## Routes
 
@@ -37,12 +38,16 @@ virtual-key or master-key systems.
 
 ## Identity model
 
-Per-user attribution relies on the OpenAI-standard `user` field in each
-request body. The proxy's pre-call hook
-(`litellm/proxy/litellm_pre_call_utils.py:2144`) copies that field to
-`end_user_id`, which the daily rollup keys on. The response renames it
-to **`email`** on the way out, on the convention that callers attach the
-user's email in that field.
+Per-user attribution flows from the virtual key's `user_id` metadata,
+set at key creation time (typically to the owner's email). The proxy
+writes `user_id` on every spend row of `LiteLLM_DailyUserSpend`, and the
+daily rollup keys on it. The response renames it to **`email`** on the
+way out.
+
+No per-request field is required on the client side — attribution is
+established by *which key* made the call, not by what the request body
+says. This also means attribution cannot be spoofed or forgotten by a
+client that fails to send a `user` field.
 
 ## Example usage
 

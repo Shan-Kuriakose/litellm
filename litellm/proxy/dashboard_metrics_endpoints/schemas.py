@@ -1,10 +1,11 @@
 """Pydantic response models for /dashboard-metrics/*.
 
 Shapes the per-user daily rollup rows for consumption by any external
-dashboard. The underlying ``end_user_id`` column is exposed as
-``email`` in the response — callers are expected to attach the user's
-email via the OpenAI-standard ``user`` field on each request so the
-proxy's existing pre-call hook can populate it.
+dashboard. The underlying ``user_id`` column (owner of the virtual key that
+made the request) is exposed as ``email`` in the response. Attribution is
+established at key provisioning time by setting ``user_id`` on the key
+(typically to the owner's email) — no per-request field is required on the
+client side.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Read-side aggregation over ``LiteLLM_DailyEndUserSpend``.
+"""Read-side aggregation over ``LiteLLM_DailyUserSpend``.
 
 The daily rollup is populated every ~10–15 s by the proxy's background
 writer (``litellm/proxy/db/daily_spend_bulk_upsert.py``), so these
@@ -61,7 +61,7 @@ async def _resolve_team_api_keys(prisma_client: Any, team_id: str) -> list[str]:
     """Return the hashed-token list for every virtual key owned by ``team_id``.
 
     The daily rollup table has no ``team_id`` column, so team scoping is
-    applied by joining via ``LiteLLM_VerificationToken.token = LiteLLM_DailyEndUserSpend.api_key``.
+    applied by joining via ``LiteLLM_VerificationToken.token = LiteLLM_DailyUserSpend.api_key``.
     See claude-dashboard/docs/per-team-dashboard/08-decisions.md D-23.
     """
     tokens = await prisma_client.db.litellm_verificationtoken.find_many(
@@ -87,7 +87,7 @@ async def _fetch_rows(
     if api_key_filter is not None:
         where["api_key"] = {"in": api_key_filter}
 
-    return await prisma_client.db.litellm_dailyenduserspend.find_many(
+    return await prisma_client.db.litellm_dailyuserspend.find_many(
         where=where,
         order=[{"date": "desc"}, {"id": "asc"}],
     )
@@ -123,7 +123,7 @@ def _summarize(rows: list[Any]) -> dict[str, float]:
     failed = sum(int(r.failed_requests or 0) for r in rows)
     latency_total = sum(int(r.total_response_time_ms or 0) for r in rows)
     timed = sum(int(r.timed_requests or 0) for r in rows)
-    active_users = len({r.end_user_id for r in rows if r.end_user_id and (r.api_requests or 0) > 0})
+    active_users = len({r.user_id for r in rows if r.user_id and (r.api_requests or 0) > 0})
     avg_latency_ms = (latency_total / timed) if timed > 0 else 0.0
     return {
         "cost": cost,
@@ -171,8 +171,8 @@ def _build_trend(rows: list[Any]) -> list[TrendPoint]:
         bucket["cost"] += float(r.spend or 0)
         bucket["tokens"] += _row_total_tokens(r)
         bucket["requests"] += int(r.api_requests or 0)
-        if r.end_user_id and (r.api_requests or 0) > 0:
-            bucket["users"].add(r.end_user_id)
+        if r.user_id and (r.api_requests or 0) > 0:
+            bucket["users"].add(r.user_id)
 
     return sorted(
         (
@@ -228,7 +228,7 @@ def _build_token_breakdown(rows: list[Any]) -> list[TokenBreakdown]:
 def _build_users(rows: list[Any]) -> list[UserMetricsRow]:
     by_email: dict[str, dict[str, Any]] = {}
     for r in rows:
-        email = r.end_user_id
+        email = r.user_id
         if not email:
             continue
         bucket = by_email.setdefault(
@@ -382,7 +382,7 @@ async def get_pricing_gaps(
 async def get_health(prisma_client: Any) -> HealthResponse:
     now = datetime.now(timezone.utc)
     try:
-        recent = await prisma_client.db.litellm_dailyenduserspend.find_many(
+        recent = await prisma_client.db.litellm_dailyuserspend.find_many(
             order=[{"updated_at": "desc"}],
             take=1,
         )
